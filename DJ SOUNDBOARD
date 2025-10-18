@@ -1,0 +1,213 @@
+import tkinter as tk
+from PIL import Image, ImageTk
+import os, json, random, colorsys
+from pygame import mixer
+
+# ---------------- Config ----------------
+CONFIG_FILE = "config.json"
+SOUND_FOLDER = "sounds"
+BACKGROUND_DARK = "DJ.jpg"
+BACKGROUND_LIGHT = "light.jpg"
+
+sounds_map = {
+    "Aka Maga":"Akka-Maga-Akka-Maga-Enakku-Oruthi.mp3",
+    "Chuttamalle":"Chuttamalle.mp3",
+    "OTP":"Open-The-Tasmac.mp3",
+    "GBU":"God Bless U.mp3",
+    "Hukum":"Hukum---Thalaivar-Alappara-MassTamilan.dev.mp3",
+    "Malaiyur":"Malaiyur-MassTamilan.com.mp3",
+    "RCK":"Rockaankuthu.mp3",
+    "Salambala":"Salambala.mp3",
+    "Scene ah":"Scene-Ah-Scene-Ah-MassTamilan.dev.mp3",
+    "KAAMA":"Sunder Chandran - KAMATCHI.mp3",
+    "WTK":"What A Karavad.mp3"
+}
+
+key_map = {"a":"Aka Maga","s":"Chuttamalle","d":"OTP","f":"GBU","g":"Hukum",
+           "h":"Malaiyur","z":"RCK","x":"Salambala","c":"Scene ah","v":"KAAMA","b":"WTK"}
+
+NUM_CHANNELS = 16
+DEFAULT_GLOBAL_VOLUME = 0.7
+DEFAULT_PAD_VOLUME = 0.9
+FADE_IN_MS = 400
+FADE_OUT_MS = 900
+EQUALIZER_BARS = 20
+EQUALIZER_UPDATE_MS = 40
+VOLUME_STEP = 0.05
+NUM_PARTICLES = 100
+
+# ---------------- Config load/save ----------------
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE,"r") as f: return json.load(f)
+        except: return {}
+    return {}
+def save_config(cfg):
+    try:
+        with open(CONFIG_FILE,"w") as f: json.dump(cfg,f)
+    except: pass
+
+config = load_config()
+theme = config.get("theme","dark")
+current_volume = config.get("global_volume",DEFAULT_GLOBAL_VOLUME)
+pad_volumes = {name: config.get("pad_volumes",{}).get(name,DEFAULT_PAD_VOLUME) for name in sounds_map.keys()}
+
+# ---------------- Mixer ----------------
+mixer.init()
+mixer.set_num_channels(NUM_CHANNELS)
+channels = [mixer.Channel(i) for i in range(NUM_CHANNELS)]
+
+sound_objects = {}
+for name, file in sounds_map.items():
+    path = os.path.join(SOUND_FOLDER,file.strip())
+    if os.path.exists(path):
+        try: sound_objects[name] = mixer.Sound(path)
+        except: print(f"Error loading {path}")
+    else: print(f"Missing: {path}")
+
+# ---------------- UI ----------------
+root = tk.Tk()
+root.title("🎚 Swag DJ Soundboard")
+# Fixed-size window for IDLE
+root.geometry("1280x720")
+root.config(cursor="arrow")  # Show cursor in IDLE
+
+screen_width,screen_height = 1280, 720
+
+# Background with particle canvas
+bg_canvas = tk.Canvas(root, width=screen_width, height=screen_height, bg="#111", highlightthickness=0)
+bg_canvas.pack(fill="both", expand=True)
+
+# Load background image
+def set_bg(path):
+    if os.path.exists(path):
+        img=Image.open(path).resize((screen_width,screen_height),Image.Resampling.LANCZOS)
+        photo=ImageTk.PhotoImage(img)
+        bg_canvas.bg_image = photo
+        bg_canvas.create_image(0,0, anchor="nw", image=photo)
+        set_bg(BACKGROUND_DARK if theme=="dark" else BACKGROUND_LIGHT)
+
+# ---------------- Particles ----------------
+particles = []
+for _ in range(NUM_PARTICLES):
+    x=random.randint(0,screen_width)
+    y=random.randint(0,screen_height)
+    size=random.randint(2,6)
+    speed=random.uniform(0.2,1.0)
+    color=f'#{random.randint(100,255):02x}{random.randint(100,255):02x}{random.randint(100,255):02x}'
+    particle = {"x":x,"y":y,"size":size,"speed":speed,"color":color}
+    particle["id"] = bg_canvas.create_oval(x,y,x+size,y+size,fill=color,outline="")
+    particles.append(particle)
+
+def animate_particles():
+    for p in particles:
+        p["y"] -= p["speed"]
+        if p["y"] < -10:
+            p["y"]=screen_height+10
+            p["x"]=random.randint(0,screen_width)
+        bg_canvas.coords(p["id"], p["x"],p["y"], p["x"]+p["size"], p["y"]+p["size"])
+    root.after(30, animate_particles)
+animate_particles()
+
+# ---------------- Top Controls ----------------
+top_frame=tk.Frame(bg_canvas,bg="#111")
+bg_canvas.create_window(screen_width//2,30,window=top_frame,anchor="n")
+tk.Label(top_frame,text="🎧 Swag DJ Soundboard",font=("Segoe UI",22,"bold"),fg="#0ff",bg="#111").pack(side="left",padx=10)
+vol_label=tk.Label(top_frame,text=f"🔊 {int(current_volume*100)}%",font=("Segoe UI",16,"bold"),fg="#0ff",bg="#111")
+vol_label.pack(side="right",padx=10)
+
+def update_vol_label(): vol_label.config(text=f"🔊 {int(current_volume*100)}%")
+def set_volumes():
+    for n,snd in sound_objects.items(): snd.set_volume(current_volume*pad_volumes[n])
+    for ch in channels: ch.set_volume(current_volume)
+def vol_up(): global current_volume; current_volume=min(1.0,current_volume+VOLUME_STEP); set_volumes(); update_vol_label()
+def vol_down(): global current_volume; current_volume=max(0.0,current_volume-VOLUME_STEP); set_volumes(); update_vol_label()
+
+tk.Button(top_frame,text="🔉 -",command=vol_down,bg="#222",fg="#0ff",font=("Segoe UI",14,"bold")).pack(side="right",padx=5)
+tk.Button(top_frame,text="🔊 +",command=vol_up,bg="#222",fg="#0ff",font=("Segoe UI",14,"bold")).pack(side="right")
+def fade_all(): [ch.fadeout(FADE_OUT_MS) for ch in channels]
+tk.Button(top_frame,text="⏹ Fade",command=fade_all,bg="#E53935",fg="white",font=("Segoe UI",12,"bold")).pack(side="right",padx=10)
+
+# ---------------- Pad Grid ----------------
+pad_frame = tk.Frame(bg_canvas,bg="#111")
+bg_canvas.create_window(screen_width//2, screen_height//2, window=pad_frame, anchor="c")
+pad_buttons={}; pad_sliders={}
+cols=4
+rows=(len(sounds_map)+cols-1)//cols
+
+for r in range(rows*3): pad_frame.grid_rowconfigure(r,weight=1)
+for c in range(cols): pad_frame.grid_columnconfigure(c,weight=1)
+
+def gradient_color(idx,t=0):
+    hue=((idx/len(sounds_map))+t)%1.0
+    r,g,b=colorsys.hsv_to_rgb(hue,0.85,0.95)
+    return f'#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}'
+
+hover_state={}
+def animate_hover():
+    t=random.random()
+    for name,btn in pad_buttons.items():
+        if hover_state.get(name,False): btn.config(bg=gradient_color(list(sounds_map.keys()).index(name),t))
+    root.after(100,animate_hover)
+animate_hover()
+
+for idx,name in enumerate(list(sounds_map.keys())):
+    r=idx//cols; c=idx%cols
+    btn=tk.Button(pad_frame,text=name,font=("Segoe UI",16,"bold"),bg=gradient_color(idx),fg="white",relief="raised",bd=4)
+    btn.grid(row=r*3,column=c,sticky="nsew",padx=5,pady=5)
+    pad_buttons[name]=btn
+    key_hint="".join([k.upper() for k,v in key_map.items() if v==name])
+    tk.Label(pad_frame,text=f"Key:[{key_hint}]",font=("Segoe UI",12),fg="#0ff",bg="#111").grid(row=r*3+1,column=c)
+
+    def on_enter(e,n=name): hover_state[n]=True; e.widget.config(fg="#111")
+    def on_leave(e,n=name): hover_state[n]=False; e.widget.config(fg="white"); e.widget.config(bg=gradient_color(list(sounds_map.keys()).index(n),0))
+    btn.bind("<Enter>",on_enter); btn.bind("<Leave>",on_leave)
+
+    def make_slider(n,rr=r,cc=c):
+        def on_slide(val):
+            v=float(val)/100.0
+            pad_volumes[n]=v
+            snd=sound_objects.get(n)
+            if snd: snd.set_volume(current_volume*v)
+        s=tk.Scale(pad_frame,from_=0,to=100,orient="horizontal",length=160,command=on_slide,showvalue=False)
+        s.set(int(pad_volumes[n]*100))
+        s.grid(row=rr*3+2,column=cc,pady=(2,5))
+        return s
+    pad_sliders[name]=make_slider(name)
+
+# ---------------- Playback ----------------
+def free_ch(): return mixer.find_channel() or channels[0]
+def play(name,fade=FADE_IN_MS):
+    if name not in sound_objects: return
+    snd=sound_objects[name]; snd.set_volume(current_volume*pad_volumes[name])
+    ch=free_ch()
+    try: ch.play(snd,fade_ms=fade)
+    except: ch.play(snd)
+    btn=pad_buttons.get(name)
+    if btn: btn.config(relief="sunken"); root.after(140,lambda:btn.config(relief="raised"))
+for n,btn in pad_buttons.items(): btn.config(command=lambda n=n:play(n))
+
+# ---------------- Keyboard ----------------
+def adjust_pad_vol(n,increase=True):
+    cur=pad_volumes.get(n,DEFAULT_PAD_VOLUME)
+    cur=min(1.0,cur+VOLUME_STEP) if increase else max(0.0,cur-VOLUME_STEP)
+    pad_volumes[n]=cur
+    snd=sound_objects.get(n); slider=pad_sliders.get(n)
+    if snd: snd.set_volume(cur*current_volume)
+    if slider: slider.set(int(cur*100))
+
+def on_key(e):
+    k=e.keysym.lower(); shift=bool(e.state&0x0001); ctrl=bool(e.state&0x0004)
+    if k in key_map:
+        name=key_map[k]
+        if shift: adjust_pad_vol(name,True)
+        elif ctrl: adjust_pad_vol(name,False)
+        else: play(name)
+    elif k=="space": fade_all()
+    elif k=="up": vol_up()
+    elif k=="down": vol_down()
+    elif k=="escape": root.destroy()
+root.bind("<Key>",on_key)
+set_volumes()
+root.mainloop()
